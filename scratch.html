@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>光速退休刮刮乐 - 核能加速 | 目标300万</title>
+    <title>退休刮刮乐 - 余额300万胜利 | 可暂停托管</title>
     <style>
         * {
             user-select: none;
@@ -265,6 +265,10 @@
         .retirement-text {
             animation: goldenGlow 1.2s infinite;
         }
+        .pause-btn {
+            background: #e67e22;
+            box-shadow: 0 4px 0 #b45f1b;
+        }
         @keyframes goldenGlow {
             0% { text-shadow: 0 0 2px gold; }
             100% { text-shadow: 0 0 12px #ffaa33; }
@@ -281,7 +285,7 @@
 <div class="game-container">
     <div class="game-panel">
         <div class="assets-bar">
-            <div class="asset-item">💰 我的金币 <span id="coinBalance" class="asset-value">100</span></div>
+            <div class="asset-item">💰 我的余额 <span id="coinBalance" class="asset-value">100</span></div>
             <div class="asset-item">🪓 刮板半径 <span id="brushRadiusDisplay" class="asset-value">22</span> px</div>
             <div class="asset-item">⚡ 核能等级 <span id="speedLevel" class="asset-value">0</span></div>
         </div>
@@ -311,7 +315,7 @@
                     <div class="shop-name">🤖 光速托管 (买+刮)</div>
                     <div class="shop-price">💰 200 金币/永久</div>
                 </div>
-                <button class="shop-btn" id="autoBuyModeBtn">🚀 开启光速托管</button>
+                <button class="shop-btn" id="autoBuyModeBtn">🚀 开启托管</button>
             </div>
             <div class="shop-card">
                 <div class="shop-info">
@@ -322,8 +326,14 @@
             </div>
         </div>
 
+        <!-- 新增托管控制区 -->
+        <div style="display: flex; justify-content: center; gap: 12px; margin: 10px 0;">
+            <button class="btn" id="pauseAutoBtn" style="background:#e67e22; box-shadow:0 4px 0 #b45f1b;">⏸️ 暂停托管</button>
+            <button class="btn" id="resumeAutoBtn" style="background:#2ecc71; box-shadow:0 4px 0 #229954;">▶️ 继续托管</button>
+        </div>
+
         <div class="jackpot-area">
-            <span class="total-label">🏆 累计刮出奖金 (目标300万退休金) 🏆</span>
+            <span class="total-label">🏆 目标：余额达到300万退休 🏆</span>
             <span class="total-number" id="totalScratched">0</span>
         </div>
 
@@ -339,7 +349,7 @@
             <button class="btn" id="fullResetBtn">🔄 完全重置</button>
         </div>
         <div class="message-area" id="gameMessage">
-            💣 核能加速！最高8级，刮卡速度快如闪电，托管循环间隔极短，瞬间退休不是梦！
+            💣 目标：余额达到300万即可光荣退休！核能加速，托管可随时暂停/继续！
         </div>
         <div>
             <span class="auto-scratch-indicator" id="autoStatus">⚙️ 核能刮卡: 待机</span>
@@ -350,27 +360,23 @@
 
 <script>
     (function(){
-        // ========== 核能加速设定 ==========
-        const WIN_TARGET = 3000000;      
+        // ========== 胜利条件：余额达到300万 ==========
+        const WIN_TARGET_BALANCE = 3000000;   // 余额达到300万胜利
         const CARD_PRICE = 10;
         const MAX_BRUSH_RADIUS = 65;
         const AUTO_BUY_COST = 200;
-        const SPEED_UPGRADE_COST = 100;   // 更便宜，鼓励升满
-        const MAX_SPEED_LEVEL = 8;        // 最高8级，终极光速
+        const SPEED_UPGRADE_COST = 100;
+        const MAX_SPEED_LEVEL = 8;
         
-        // 核能加速效果：0级: 5秒, 1级: 3秒, 2级: 1.8秒, 3级: 1秒, 4级: 0.5秒, 5级: 0.25秒, 6级: 0.12秒, 7级: 0.06秒, 8级: 0.03秒 (几乎瞬间)
+        // 核能加速效果
         function getScratchDurationBySpeed(level) {
             const durations = [5000, 3000, 1800, 1000, 500, 250, 120, 60, 30];
             return durations[Math.min(level, MAX_SPEED_LEVEL)];
         }
-        
-        // 刮擦间隔也随等级急剧缩短
         function getScratchIntervalBySpeed(level) {
             const intervals = [60, 40, 25, 15, 8, 5, 3, 2, 1];
             return intervals[Math.min(level, MAX_SPEED_LEVEL)];
         }
-        
-        // 每次刮擦的点数随等级暴增，瞬间涂满
         function getScratchPointsPerLoop(level) {
             return 20 + level * 10;
         }
@@ -379,20 +385,21 @@
         const PRIZE_WEIGHTS = [35, 30, 25, 20, 15, 10, 8, 5, 3, 2, 1, 1, 0.5];
         
         // ========== 游戏数据 ==========
-        let coinBalance = 100;
-        let totalScratchedReward = 0;
+        let coinBalance = 100;               // 当前余额（胜利判定依据）
+        let totalScratchedReward = 0;        // 累计刮出奖金（仅展示用）
         let gameActive = true;
         let gameWinFlag = false;
         let gameLoseFlag = false;
         let brushRadius = 22;
         let currentCardPrize = 0;
         let prizeClaimed = false;
-        let speedLevel = 0;               // 加速等级 0-8
+        let speedLevel = 0;
         
         // 自动托管相关
         let autoBuyEnabled = false;
         let autoBuyLoopInterval = null;
         let isAutoBuyRunning = false;
+        let isPaused = false;                 // 新增暂停标志
         
         let canvas = document.getElementById('scratchCanvas');
         let ctx = canvas.getContext('2d');
@@ -412,10 +419,20 @@
         const buyNewCardBtn = document.getElementById('buyNewCardBtn');
         const autoBuyModeBtn = document.getElementById('autoBuyModeBtn');
         const buySpeedBtn = document.getElementById('buySpeedBtn');
+        const pauseAutoBtn = document.getElementById('pauseAutoBtn');
+        const resumeAutoBtn = document.getElementById('resumeAutoBtn');
         
         // ========== 辅助函数 ==========
         function formatMoney(value) {
             return Math.floor(value).toLocaleString('zh-CN');
+        }
+        
+        // 检查胜利条件：余额 >= 300万
+        function checkWinByBalance() {
+            if(gameWinFlag || gameLoseFlag) return;
+            if(coinBalance >= WIN_TARGET_BALANCE) {
+                gameWin();
+            }
         }
         
         function updateUI() {
@@ -450,7 +467,7 @@
             if (speedLevel >= MAX_SPEED_LEVEL) {
                 buySpeedBtn.classList.add('disabled');
                 buySpeedBtn.disabled = true;
-                buySpeedBtn.innerText = '💥 核能MAX 光速退休';
+                buySpeedBtn.innerText = '💥 核能MAX';
             } else {
                 buySpeedBtn.classList.remove('disabled');
                 buySpeedBtn.disabled = false;
@@ -470,17 +487,20 @@
                 autoBuyModeBtn.classList.add('disabled');
                 autoBuyModeBtn.disabled = true;
             } else {
-                autoBuyModeBtn.innerText = '🚀 开启光速托管 (200金币/永久)';
+                autoBuyModeBtn.innerText = '🚀 开启托管 (200金币/永久)';
                 autoBuyModeBtn.classList.remove('disabled');
                 autoBuyModeBtn.disabled = false;
             }
             const statusSpan = document.getElementById('autoBuyStatus');
             if (statusSpan) {
-                if (autoBuyEnabled && isAutoBuyRunning) {
-                    statusSpan.innerHTML = '🤖 光速托管: 核能运行 💥';
+                if (autoBuyEnabled && isAutoBuyRunning && !isPaused) {
+                    statusSpan.innerHTML = '🤖 光速托管: 运行中 💥';
                     statusSpan.style.background = "#d9530e";
+                } else if (autoBuyEnabled && isPaused) {
+                    statusSpan.innerHTML = '🤖 托管: 已暂停 ⏸️';
+                    statusSpan.style.background = "#e67e22";
                 } else if (autoBuyEnabled && !isAutoBuyRunning) {
-                    statusSpan.innerHTML = '🤖 托管: 已暂停';
+                    statusSpan.innerHTML = '🤖 托管: 已停止';
                     statusSpan.style.background = "#5f3b4c";
                 } else {
                     statusSpan.innerHTML = '🤖 托管: 未开启';
@@ -509,8 +529,8 @@
             gameLoseFlag = true;
             gameActive = false;
             setMessage(`💀 破产失败！${reason} 请点击「完全重置」重新开始 💀`, false, false);
-            if(autoScratchInterval) stopAutoScratch();
-            if(autoBuyLoopInterval) stopAutoBuyLoop();
+            stopAutoScratch();
+            stopAutoBuyLoop();
             if(buyNewCardBtn) {
                 buyNewCardBtn.classList.add('disabled');
                 buyNewCardBtn.disabled = true;
@@ -526,9 +546,9 @@
             if(gameWinFlag) return;
             gameWinFlag = true;
             gameActive = false;
-            setMessage(`🏆🏆🏆 恭喜退休！累计刮出奖金达到 ¥${formatMoney(WIN_TARGET)}，您光荣退休，享受人生！ 🏆🏆🏆`, false, true);
-            if(autoScratchInterval) stopAutoScratch();
-            if(autoBuyLoopInterval) stopAutoBuyLoop();
+            setMessage(`🏆🏆🏆 恭喜退休！您的余额已达到 ¥${formatMoney(WIN_TARGET_BALANCE)}，光荣退休，享受人生！ 🏆🏆🏆`, false, true);
+            stopAutoScratch();
+            stopAutoBuyLoop();
             if(buyNewCardBtn) {
                 buyNewCardBtn.classList.add('disabled');
                 buyNewCardBtn.disabled = true;
@@ -558,10 +578,8 @@
         
         function generateCardPrize() {
             if(!gameActive || gameWinFlag || gameLoseFlag) return 0;
-            let remainToWin = WIN_TARGET - totalScratchedReward;
-            if(remainToWin <= 0) return 0;
+            // 不再限制剩余额度，因为胜利条件是余额，不是累计刮出
             let raw = getRandomPrizeRaw();
-            if(raw > remainToWin) raw = remainToWin;
             return raw;
         }
         
@@ -584,14 +602,58 @@
             updateAutoBuyButtonUI();
         }
         
-        // 光速托管核心循环（极短间隔）
+        // 暂停托管
+        function pauseAuto() {
+            if(!autoBuyEnabled) {
+                setMessage("托管未开启，无需暂停", true);
+                return;
+            }
+            if(isPaused) {
+                setMessage("托管已经处于暂停状态");
+                return;
+            }
+            isPaused = true;
+            // 停止当前正在进行的刮卡
+            if(isAutoScratching) stopAutoScratch();
+            setMessage("⏸️ 托管已暂停，点击「继续托管」恢复");
+            updateAutoBuyButtonUI();
+        }
+        
+        // 继续托管
+        function resumeAuto() {
+            if(!autoBuyEnabled) {
+                setMessage("请先开启托管", true);
+                return;
+            }
+            if(gameWinFlag || gameLoseFlag) {
+                setMessage(gameWinFlag ? "已退休，无法继续" : "已破产，请重置", true);
+                return;
+            }
+            if(!isPaused) {
+                setMessage("托管正在运行中");
+                return;
+            }
+            isPaused = false;
+            setMessage("▶️ 托管已恢复，继续冲击300万退休金！");
+            updateAutoBuyButtonUI();
+            // 重新激活循环
+            if(isAutoBuyRunning) {
+                // 如果循环定时器存在但暂停标志导致不执行动作，重新触发一次
+                autoBuyAndScratchCycle();
+            } else {
+                startAutoBuyLoop();
+            }
+        }
+        
+        // 光速托管核心循环（可暂停）
         function autoBuyAndScratchCycle() {
             if(gameWinFlag || gameLoseFlag) {
                 stopAutoBuyLoop();
                 stopAutoScratch();
                 return;
             }
-            if(!autoBuyEnabled || !gameActive) return;
+            if(!autoBuyEnabled || !isAutoBuyRunning || isPaused) return;
+            if(!gameActive) gameActive = true;
             
             if(!prizeClaimed && currentCardPrize > 0) {
                 let percent = totalPixels > 0 ? (revealedPixels / totalPixels) * 100 : 0;
@@ -605,8 +667,7 @@
                 if(isAutoScratching) stopAutoScratch();
                 if(coinBalance >= CARD_PRICE) {
                     performBuyCard();
-                    // 极速模式下几乎无延迟直接启动刮卡
-                    if(autoBuyEnabled && !gameWinFlag && !gameLoseFlag && gameActive && !prizeClaimed) {
+                    if(autoBuyEnabled && !gameWinFlag && !gameLoseFlag && gameActive && !prizeClaimed && !isPaused) {
                         startAutoScratchOnly();
                     }
                 } else {
@@ -629,10 +690,8 @@
             
             prizeClaimed = false;
             currentCardPrize = generateCardPrize();
-            if(totalScratchedReward >= WIN_TARGET && !gameWinFlag) {
-                gameWin();
-                return false;
-            }
+            // 检查胜利（余额可能因购卡减少，但购卡后不会胜利，只有刮出奖金增加余额才可能胜利）
+            checkWinByBalance();
             if(gameWinFlag || gameLoseFlag) return false;
             
             initCoverCanvas();
@@ -643,31 +702,33 @@
             return true;
         }
         
-        // 核能自动刮卡（快到几乎瞬间完成）
         function startAutoScratchOnly() {
             if(isAutoScratching) return;
             if(gameWinFlag || gameLoseFlag || !gameActive) return;
             if(prizeClaimed) return;
+            if(isPaused) return;
             
             let duration = getScratchDurationBySpeed(speedLevel);
             let intervalTime = getScratchIntervalBySpeed(speedLevel);
             let pointsPerLoop = getScratchPointsPerLoop(speedLevel);
             
-            setMessage(`💥 核能刮卡启动！${duration}ms 内爆开涂层 (Lv${speedLevel})`);
             isAutoScratching = true;
             const autoStatusSpan = document.getElementById('autoStatus');
-            if(autoStatusSpan) autoStatusSpan.innerHTML = `💢 核能刮卡 Lv${speedLevel} ⚡⚡`;
+            if(autoStatusSpan) autoStatusSpan.innerHTML = `💢 核能刮卡 Lv${speedLevel} ⚡`;
             
             const startTime = Date.now();
             if(autoScratchInterval) clearInterval(autoScratchInterval);
             autoScratchInterval = setInterval(() => {
-                if(!gameActive || gameWinFlag || gameLoseFlag || !isAutoScratching) {
+                if(!gameActive || gameWinFlag || gameLoseFlag || !isAutoScratching || isPaused) {
+                    if(isPaused) {
+                        // 暂停时不继续刮，但不清除定时器，等待恢复时重新启动
+                        return;
+                    }
                     stopAutoScratch();
                     return;
                 }
                 if(Date.now() - startTime >= duration) {
                     stopAutoScratch();
-                    // 刮完后强制将所有未刮区域一次性刮开（确保领奖）
                     forceFullyScratch();
                     let percent = totalPixels>0 ? (revealedPixels/totalPixels)*100 : 0;
                     if(!prizeClaimed && gameActive && !gameWinFlag && !gameLoseFlag && percent >= 48) {
@@ -685,7 +746,6 @@
             }, intervalTime);
         }
         
-        // 强制完全刮开剩余涂层
         function forceFullyScratch() {
             if(!coverCtx) return;
             let w = coverCanvas.width;
@@ -706,7 +766,6 @@
             }
         }
         
-        // 购买核能加速
         function buySpeedUpgrade() {
             if(gameWinFlag || gameLoseFlag) {
                 setMessage(gameWinFlag ? "已退休，重置后可购买加速" : "已破产，请重置", true);
@@ -722,14 +781,12 @@
                 updateUI();
                 let newDuration = getScratchDurationBySpeed(speedLevel);
                 setMessage(`💢 核能升级至 Lv${speedLevel}！刮卡仅需 ${newDuration}ms，托管循环加速！`);
-                if(autoBuyEnabled && isAutoBuyRunning) {
-                    // 重启托管循环以应用更快的循环间隔
+                if(autoBuyEnabled && isAutoBuyRunning && !isPaused) {
                     if(autoBuyLoopInterval) {
                         clearInterval(autoBuyLoopInterval);
                         let loopInterval = Math.max(100, 1800 - speedLevel * 180);
                         autoBuyLoopInterval = setInterval(() => {
-                            if(!autoBuyEnabled || !isAutoBuyRunning || gameWinFlag || gameLoseFlag) {
-                                if(gameWinFlag || gameLoseFlag) stopAutoBuyLoop();
+                            if(!autoBuyEnabled || !isAutoBuyRunning || gameWinFlag || gameLoseFlag || isPaused) {
                                 return;
                             }
                             if(!gameActive) gameActive = true;
@@ -779,31 +836,20 @@
                 setMessage("托管循环已在运行中");
                 return;
             }
+            isPaused = false;
             isAutoBuyRunning = true;
             updateAutoBuyButtonUI();
-            setMessage("🚀 光速托管已开启！核能加速，瞬间退休！");
+            setMessage("🚀 光速托管已开启！核能加速，随时可暂停！");
             if(autoBuyLoopInterval) clearInterval(autoBuyLoopInterval);
             let loopInterval = Math.max(100, 1800 - speedLevel * 180);
             autoBuyLoopInterval = setInterval(() => {
-                if(!autoBuyEnabled || !isAutoBuyRunning || gameWinFlag || gameLoseFlag) {
-                    if(gameWinFlag || gameLoseFlag) stopAutoBuyLoop();
+                if(!autoBuyEnabled || !isAutoBuyRunning || gameWinFlag || gameLoseFlag || isPaused) {
                     return;
                 }
                 if(!gameActive) gameActive = true;
                 autoBuyAndScratchCycle();
             }, loopInterval);
             setTimeout(() => autoBuyAndScratchCycle(), 20);
-        }
-        
-        function stopAutoBuyAndScratch() {
-            if(autoBuyLoopInterval) {
-                clearInterval(autoBuyLoopInterval);
-                autoBuyLoopInterval = null;
-            }
-            isAutoBuyRunning = false;
-            if(autoScratchInterval) stopAutoScratch();
-            setMessage("🛑 手动停止光速托管");
-            updateAutoBuyButtonUI();
         }
         
         function buyAndNewCard() {
@@ -828,10 +874,7 @@
             
             prizeClaimed = false;
             currentCardPrize = generateCardPrize();
-            if(totalScratchedReward >= WIN_TARGET && !gameWinFlag) {
-                gameWin();
-                return false;
-            }
+            checkWinByBalance();
             if(gameWinFlag || gameLoseFlag) return false;
             
             initCoverCanvas();
@@ -851,11 +894,10 @@
                 coinBalance += currentCardPrize;
                 totalScratchedReward += currentCardPrize;
                 updateUI();
-                setMessage(`🎉 刮出奖金 ¥${formatMoney(currentCardPrize)}！ +${formatMoney(currentCardPrize)}金币！ 累计: ¥${formatMoney(totalScratchedReward)} / 300万 🎉`);
+                setMessage(`🎉 刮出奖金 ¥${formatMoney(currentCardPrize)}！ +${formatMoney(currentCardPrize)}金币！ 当前余额: ¥${formatMoney(coinBalance)} 🎉`);
                 
-                if(totalScratchedReward >= WIN_TARGET) {
-                    gameWin();
-                }
+                // 检查胜利条件：余额是否达到300万
+                checkWinByBalance();
                 drawBasePrizeLayer();
                 drawCoverToMain();
                 return true;
@@ -864,8 +906,8 @@
         }
         
         function fullReset() {
-            if(autoScratchInterval) stopAutoScratch();
-            if(autoBuyLoopInterval) stopAutoBuyLoop();
+            stopAutoScratch();
+            stopAutoBuyLoop();
             coinBalance = 100;
             totalScratchedReward = 0;
             brushRadius = 22;
@@ -875,6 +917,7 @@
             gameLoseFlag = false;
             autoBuyEnabled = false;
             isAutoBuyRunning = false;
+            isPaused = false;
             updateUI();
             prizeClaimed = false;
             currentCardPrize = generateCardPrize();
@@ -883,7 +926,7 @@
             drawCoverFull();
             revealedPixels = 0;
             updateScratchPercent(0);
-            setMessage("✨ 完全重置！初始金币100，目标300万退休金！核能加速等你解锁 ✨");
+            setMessage("✨ 完全重置！初始余额100，目标余额300万退休！核能加速等你解锁 ✨");
             updateAutoBuyButtonUI();
             updateBrushButtonState();
             updateSpeedButtonState();
@@ -917,7 +960,7 @@
             ctx.fillText(prizeShowText, canvas.width*0.32, canvas.height*0.65);
             ctx.font = `16px system-ui`;
             ctx.fillStyle = "#7a4316";
-            ctx.fillText(`累计: ${formatMoney(totalScratchedReward)} / 3,000,000`, canvas.width*0.5, canvas.height*0.92);
+            ctx.fillText(`余额: ${formatMoney(coinBalance)} / 3,000,000`, canvas.width*0.45, canvas.height*0.92);
             ctx.fillText(`10金/张`, canvas.width*0.1, canvas.height*0.96);
         }
         
@@ -941,7 +984,7 @@
             }
             coverCtx.font = `bold ${coverCanvas.width*0.09}px "Impact"`;
             coverCtx.fillStyle = "#ddddddbb";
-            coverCtx.fillText("核能退休", coverCanvas.width*0.32, coverCanvas.height*0.5);
+            coverCtx.fillText("余额300万退休", coverCanvas.width*0.22, coverCanvas.height*0.5);
             drawCoverToMain();
             let imgData = coverCtx.getImageData(0,0,coverCanvas.width,coverCanvas.height);
             totalPixels = coverCanvas.width * coverCanvas.height;
@@ -1053,6 +1096,7 @@
                 updateUI();
                 setMessage(`🪓 购买成功！刮板半径增至 ${brushRadius} px (最大${MAX_BRUSH_RADIUS}px)`);
                 updateBrushButtonState();
+                checkWinByBalance();
             } else {
                 setMessage(`金币不足50！当前金币: ${Math.floor(coinBalance)}`, true);
             }
@@ -1125,6 +1169,8 @@
         if(autoScratchBtn) autoScratchBtn.addEventListener('click', startManualAutoScratch);
         if(autoBuyModeBtn) autoBuyModeBtn.addEventListener('click', buyAutoMode);
         if(buySpeedBtn) buySpeedBtn.addEventListener('click', buySpeedUpgrade);
+        if(pauseAutoBtn) pauseAutoBtn.addEventListener('click', pauseAuto);
+        if(resumeAutoBtn) resumeAutoBtn.addEventListener('click', resumeAuto);
         document.getElementById('fullResetBtn').addEventListener('click', fullReset);
         
         function init() {
@@ -1136,7 +1182,7 @@
             drawCoverFull();
             revealedPixels = 0;
             updateScratchPercent(0);
-            setMessage("💣 核能退休刮刮乐！目标300万，升级核能加速，光速退休不是梦！");
+            setMessage("💣 目标：余额达到300万即可退休！核能加速，托管可随时暂停/继续！");
             updateUI();
             updateBrushButtonState();
             updateSpeedButtonState();
