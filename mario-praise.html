@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>跳跃小英雄 · 通关夸夸</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #1a1a2e; color: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    overflow: hidden; user-select: none;
+  }
+  #game-container {
+    position: relative;
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas {
+    background: #0f3460;
+    box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  }
+  #ui {
+    position: absolute; top: 10px; left: 10px;
+    font-size: 14px; line-height: 1.5;
+    background: rgba(0,0,0,0.35);
+    padding: 8px 12px; border-radius: 8px;
+    pointer-events: none;
+  }
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+  }
+  .hidden { display: none !important; }
+  h1 { margin: 0 0 10px; font-size: 28px; }
+  p { margin: 6px 0; font-size: 16px; opacity: 0.9; }
+  .btn {
+    margin-top: 14px; padding: 10px 22px;
+    font-size: 16px; border: none; border-radius: 999px;
+    background: linear-gradient(135deg, #ff9a3c, #ff6b6b);
+    color: #fff; cursor: pointer; transition: transform .1s;
+  }
+  .btn:hover { transform: scale(1.05); }
+  #praise-box {
+    max-width: 560px; padding: 22px 26px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 16px; margin-top: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  #praise-box h2 { margin: 0 0 10px; font-size: 20px; color: #ffe082; }
+  .stat-row { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; margin: 8px 0; }
+  .stat { background: rgba(0,0,0,0.25); padding: 6px 12px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="game"></canvas>
+  <div id="ui">
+    <div>时间: <span id="time">0.0</span>s</div>
+    <div>金币: <span id="coins">0</span></div>
+    <div>击败: <span id="kills">0</span></div>
+    <div>死亡: <span id="deaths">0</span></div>
+  </div>
+  <div id="overlay">
+    <div id="start-screen">
+      <h1>跳跃小英雄</h1>
+      <p>方向键 / WASD 移动 · 空格 / W / ↑ 跳跃</p>
+      <p>踩敌人头顶击败它们，收集金币，抵达终点旗杆！</p>
+      <button class="btn" id="start-btn">开始冒险</button>
+    </div>
+    <div id="result-screen" class="hidden">
+      <h1>🎉 通关成功！</h1>
+      <div class="stat-row">
+        <div class="stat">时间: <span id="res-time">0</span>s</div>
+        <div class="stat">金币: <span id="res-coins">0</span></div>
+        <div class="stat">击败: <span id="res-kills">0</span></div>
+        <div class="stat">死亡: <span id="res-deaths">0</span></div>
+      </div>
+      <div id="praise-box">
+        <h2 id="praise-title">夸夸标题</h2>
+        <p id="praise-text">夸夸内容</p>
+      </div>
+      <button class="btn" id="restart-btn">再玩一次</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Responsive canvas sizing: base resolution 960x540, scaled to fit
+const BASE_W = 960;
+const BASE_H = 540;
+function resize() {
+  const scale = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
+  canvas.width = BASE_W;
+  canvas.height = BASE_H;
+  canvas.style.width = Math.floor(BASE_W * scale) + 'px';
+  canvas.style.height = Math.floor(BASE_H * scale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Input
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Game constants
+const GRAVITY = 1800;
+const PLAYER_SPEED = 220;
+const JUMP_VEL = -620;
+const ENEMY_SPEED = 90;
+
+// Level data
+const LEVEL_WIDTH = 2400;
+const GROUND_Y = 460;
+
+let lastTime = performance.now();
+let mode = 'start'; // start | play | result
+
+let player = { x: 60, y: GROUND_Y - 40, w: 28, h: 40, vx: 0, vy: 0, onGround: false, facing: 1 };
+let cameraX = 0;
+let platforms = [];
+let enemies = [];
+let coins = [];
+let particles = [];
+let flag = { x: LEVEL_WIDTH - 120, y: GROUND_Y - 120, w: 10, h: 120 };
+
+let stats = { time: 0, coins: 0, kills: 0, deaths: 0 };
+
+function initLevel() {
+  platforms = [];
+  enemies = [];
+  coins = [];
+  particles = [];
+
+  // Ground blocks (for rendering)
+  for (let i = 0; i < LEVEL_WIDTH; i += 40) {
+    platforms.push({ x: i, y: GROUND_Y, w: 40, h: 80, type: 'ground' });
+  }
+
+  // Floating platforms
+  const platSpecs = [
+    { x: 240, y: 360, w: 120 },
+    { x: 400, y: 280, w: 100 },
+    { x: 600, y: 340, w: 140 },
+    { x: 880, y: 260, w: 100 },
+    { x: 1100, y: 340, w: 120 },
+    { x: 1360, y: 280, w: 140 },
+    { x: 1620, y: 360, w: 120 },
+    { x: 1840, y: 260, w: 120 },
+    { x: 2080, y: 340, w: 160 },
+  ];
+  platSpecs.forEach(p => platforms.push({ x: p.x, y: p.y, w: p.w, h: 16, type: 'plat' }));
+
+  // Enemies on ground (with patrol ranges minX/maxX set at spawn)
+  enemies.push({ x: 340, y: GROUND_Y - 28, w: 28, h: 28, vx: ENEMY_SPEED, minX: 280, maxX: 520 });
+  enemies.push({ x: 720, y: GROUND_Y - 28, w: 28, h: 28, vx: -ENEMY_SPEED, minX: 540, maxX: 840 });
+  enemies.push({ x: 1080, y: GROUND_Y - 28, w: 28, h: 28, vx: ENEMY_SPEED, minX: 1000, maxX: 1240 });
+  enemies.push({ x: 1520, y: GROUND_Y - 28, w: 28, h: 28, vx: -ENEMY_SPEED, minX: 1360, maxX: 1600 });
+  enemies.push({ x: 1880, y: GROUND_Y - 28, w: 28, h: 28, vx: ENEMY_SPEED, minX: 1800, maxX: 2060 });
+  enemies.push({ x: 2140, y: GROUND_Y - 28, w: 28, h: 28, vx: -ENEMY_SPEED, minX: 2080, maxX: 2320 });
+
+  // Enemies on platforms
+  enemies.push({ x: 620, y: 340 - 28, w: 28, h: 28, vx: ENEMY_SPEED, plat: true });
+  enemies.push({ x: 1400, y: 280 - 28, w: 28, h: 28, vx: -ENEMY_SPEED, plat: true });
+  enemies.push({ x: 2100, y: 340 - 28, w: 28, h: 28, vx: ENEMY_SPEED, plat: true });
+
+  // Coins
+  const coinPositions = [
+    { x: 300, y: 300 }, { x: 340, y: 300 }, { x: 380, y: 300 },
+    { x: 450, y: 220 }, { x: 490, y: 220 },
+    { x: 660, y: 280 }, { x: 700, y: 280 }, { x: 740, y: 280 },
+    { x: 920, y: 200 }, { x: 960, y: 200 },
+    { x: 1140, y: 280 }, { x: 1180, y: 280 },
+    { x: 1400, y: 220 }, { x: 1440, y: 220 }, { x: 1480, y: 220 },
+    { x: 1660, y: 300 }, { x: 1700, y: 300 },
+    { x: 1900, y: 200 }, { x: 1940, y: 200 }, { x: 1980, y: 200 },
+    { x: 2160, y: 280 }, { x: 2200, y: 280 }, { x: 2240, y: 280 },
+  ];
+  coinPositions.forEach(c => coins.push({ x: c.x, y: c.y, r: 10, collected: false }));
+
+  // Reset player
+  player.x = 60; player.y = GROUND_Y - 40; player.vx = 0; player.vy = 0; player.onGround = false; player.facing = 1;
+  cameraX = 0;
+  stats = { time: 0, coins: 0, kills: 0, deaths: 0 };
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('time').textContent = stats.time.toFixed(1);
+  document.getElementById('coins').textContent = stats.coins;
+  document.getElementById('kills').textContent = stats.kills;
+  document.getElementById('deaths').textContent = stats.deaths;
+}
+
+function rectIntersect(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function spawnParticles(x, y, color, count = 8) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 120;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.4 + Math.random() * 0.4,
+      color,
+      size: 3 + Math.random() * 4
+    });
+  }
+}
+
+function resetPlayer() {
+  player.x = 60; player.y = GROUND_Y - 40; player.vx = 0; player.vy = 0; player.onGround = false;
+  stats.deaths++;
+  spawnParticles(player.x + player.w/2, player.y + player.h/2, '#ff6b6b', 12);
+  updateUI();
+}
+
+function endGame() {
+  mode = 'result';
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.remove('hidden');
+  document.getElementById('overlay').classList.remove('hidden');
+  document.getElementById('res-time').textContent = stats.time.toFixed(1);
+  document.getElementById('res-coins').textContent = stats.coins;
+  document.getElementById('res-kills').textContent = stats.kills;
+  document.getElementById('res-deaths').textContent = stats.deaths;
+  generatePraise();
+}
+
+function generatePraise() {
+  const totalCoins = 23;
+  const totalEnemies = 9;
+  const coinRate = stats.coins / totalCoins;
+  const noDeath = stats.deaths === 0;
+  const fast = stats.time < 35;
+
+  let title = '';
+  let lines = [];
+
+  if (noDeath && coinRate >= 0.8 && fast) {
+    title = '完美之星 ⭐⭐⭐';
+    lines.push('零死亡、高金币、神速通关——简直是教科书级别的表现！');
+  } else if (noDeath && stats.kills >= 5) {
+    title = '温柔战神 🛡️';
+    lines.push('你没有让敌人伤到你一分一毫，却把它们统统踩在脚下，优雅又强大。');
+  } else if (stats.coins >= totalCoins - 2) {
+    title = '寻宝大师 💰';
+    lines.push('你对金币的嗅觉堪比雷达，角落里的宝藏一个都没逃过你的眼睛。');
+  } else if (fast) {
+    title = '风一样的勇者 🌪️';
+    lines.push('你的速度快到敌人还没反应过来，你就已经冲过终点了！');
+  } else if (noDeath) {
+    title = '稳健行者 🧗';
+    lines.push('全程零死亡，稳扎稳打才是真的高手风范。');
+  } else if (stats.deaths >= 5) {
+    title = '不屈之魂 🔥';
+    lines.push('虽然摔倒了几次，但每一次都重新站了起来——这才是真正的勇者！');
+  } else {
+    title = '通关勇者 🏆';
+    lines.push('成功到达终点就是最大的胜利，你做到了！');
+  }
+
+  // Specific performance lines
+  if (stats.kills >= 7) lines.push(`还击败了 ${stats.kills} 个敌人，路上没有一个怪物敢小看你。`);
+  else if (stats.kills === 0) lines.push('你选择了无伤跑路流，能躲开的麻烦也是一种智慧。');
+
+  if (coinRate >= 0.5) lines.push(`收集到了 ${stats.coins}/${totalCoins} 枚金币，财运亨通！`);
+  else lines.push('金币可以下次再补，勇气和决心才是今天最大的收获。');
+
+  if (stats.time >= 60) lines.push('慢慢来，你用自己的节奏征服了关卡，这同样值得骄傲。');
+  else if (fast) lines.push(`仅用 ${stats.time.toFixed(1)} 秒就冲到了终点，眼疾手快！`);
+
+  document.getElementById('praise-title').textContent = title;
+  document.getElementById('praise-text').textContent = lines.join('\n');
+}
+
+function update(dt) {
+  if (mode !== 'play') return;
+  stats.time += dt;
+  updateUI();
+
+  // Horizontal movement
+  let move = 0;
+  if (keys['ArrowLeft'] || keys['KeyA']) move = -1;
+  if (keys['ArrowRight'] || keys['KeyD']) move = 1;
+  player.vx = move * PLAYER_SPEED;
+  if (move !== 0) player.facing = move;
+
+  // Jump
+  if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.onGround) {
+    player.vy = JUMP_VEL;
+    player.onGround = false;
+  }
+
+  // Gravity
+  player.vy += GRAVITY * dt;
+
+  // Apply velocity
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+
+  // Floor / platform collisions
+  player.onGround = false;
+
+  // Ground
+  if (player.y + player.h >= GROUND_Y) {
+    player.y = GROUND_Y - player.h;
+    player.vy = 0;
+    player.onGround = true;
+  }
+
+  // Platforms
+  for (const p of platforms) {
+    if (p.type !== 'plat') continue;
+    // Only land on top
+    if (player.vy >= 0 &&
+        player.x + player.w > p.x + 2 &&
+        player.x < p.x + p.w - 2 &&
+        player.y + player.h >= p.y &&
+        player.y + player.h <= p.y + p.h + player.vy * dt + 2) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+    // Hitting head under platform
+    if (player.vy < 0 &&
+        player.x + player.w > p.x + 2 &&
+        player.x < p.x + p.w - 2 &&
+        player.y <= p.y + p.h &&
+        player.y >= p.y) {
+      player.y = p.y + p.h;
+      player.vy = 0;
+    }
+    // Side collision (push out horizontally)
+    if (player.y + player.h > p.y + 2 && player.y < p.y + p.h - 2) {
+      if (player.vx > 0 && player.x + player.w > p.x && player.x + player.w - player.vx * dt <= p.x) {
+        player.x = p.x - player.w;
+        player.vx = 0;
+      } else if (player.vx < 0 && player.x < p.x + p.w && player.x - player.vx * dt >= p.x + p.w) {
+        player.x = p.x + p.w;
+        player.vx = 0;
+      }
+    }
+  }
+
+  // Walls
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > LEVEL_WIDTH) player.x = LEVEL_WIDTH - player.w;
+
+  // Camera follow
+  const targetCam = player.x - BASE_W * 0.35;
+  cameraX += (targetCam - cameraX) * Math.min(1, 8 * dt);
+  if (cameraX < 0) cameraX = 0;
+  if (cameraX > LEVEL_WIDTH - BASE_W) cameraX = LEVEL_WIDTH - BASE_W;
+
+  // Enemies
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    e.x += e.vx * dt;
+    if (e.plat) {
+      // Patrol on platform
+      const plat = platforms.find(p => p.type === 'plat' && e.y + e.h <= p.y + 2 && e.x + e.w/2 >= p.x && e.x + e.w/2 <= p.x + p.w);
+      if (plat) {
+        if (e.x < plat.x || e.x + e.w > plat.x + plat.w) e.vx *= -1;
+      }
+    } else {
+      // Ground patrol range
+      if (e.x < e.minX || e.x + e.w > e.maxX) e.vx *= -1;
+    }
+
+    // Collision with player
+    if (rectIntersect(player, e)) {
+      // Stomp from above
+      if (player.vy > 0 && player.y + player.h - player.vy * dt <= e.y + e.h * 0.5) {
+        player.vy = JUMP_VEL * 0.6;
+        enemies.splice(i, 1);
+        stats.kills++;
+        spawnParticles(e.x + e.w/2, e.y + e.h/2, '#ff9a3c', 10);
+        updateUI();
+      } else {
+        resetPlayer();
+      }
+    }
+  }
+
+  // Coins
+  for (const c of coins) {
+    if (c.collected) continue;
+    const px = player.x + player.w/2;
+    const py = player.y + player.h/2;
+    const dx = px - c.x;
+    const dy = py - c.y;
+    if (dx*dx + dy*dy < (player.w/2 + c.r) ** 2) {
+      c.collected = true;
+      stats.coins++;
+      spawnParticles(c.x, c.y, '#ffe082', 8);
+      updateUI();
+    }
+  }
+
+  // Win condition
+  if (player.x + player.w >= flag.x && player.x <= flag.x + flag.w && player.y + player.h >= flag.y) {
+    endGame();
+  }
+
+  // Fall off
+  if (player.y > BASE_H + 60) {
+    resetPlayer();
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function draw() {
+  // Clear
+  ctx.fillStyle = '#0f3460';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Background mountains
+  ctx.save();
+  ctx.fillStyle = '#16213e';
+  ctx.beginPath();
+  for (let x = 0; x <= BASE_W; x += 60) {
+    const h = 80 + Math.sin((x + cameraX * 0.2) * 0.01) * 40;
+    ctx.lineTo(x, BASE_H - h);
+  }
+  ctx.lineTo(BASE_W, BASE_H);
+  ctx.lineTo(0, BASE_H);
+  ctx.fill();
+  ctx.restore();
+
+  if (mode === 'start') {
+    drawStartDecorations();
+    return;
+  }
+
+  const cx = Math.floor(cameraX);
+
+  // Platforms / ground
+  for (const p of platforms) {
+    if (p.x - cx > BASE_W || p.x + p.w - cx < 0) continue;
+    if (p.type === 'ground') {
+      ctx.fillStyle = '#2a9d8f';
+      ctx.fillRect(Math.floor(p.x - cx), p.y, p.w, p.h);
+      ctx.fillStyle = '#264653';
+      ctx.fillRect(Math.floor(p.x - cx), p.y, p.w, 4);
+    } else {
+      ctx.fillStyle = '#e9c46a';
+      ctx.fillRect(Math.floor(p.x - cx), p.y, p.w, p.h);
+      ctx.strokeStyle = '#f4a261';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.floor(p.x - cx) + 0.5, p.y + 0.5, p.w - 1, p.h - 1);
+    }
+  }
+
+  // Flag
+  ctx.fillStyle = '#e76f51';
+  ctx.fillRect(Math.floor(flag.x - cx), flag.y, flag.w, flag.h);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(flag.x - cx + flag.w, flag.y);
+  ctx.lineTo(flag.x - cx + flag.w + 30, flag.y + 15);
+  ctx.lineTo(flag.x - cx + flag.w, flag.y + 30);
+  ctx.fill();
+
+  // Coins
+  for (const c of coins) {
+    if (c.collected) continue;
+    if (c.x - cx > BASE_W + 20 || c.x - cx < -20) continue;
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.arc(c.x - cx, c.y, c.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#bfa030';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#bfa030';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('¥', c.x - cx, c.y + 1);
+  }
+
+  // Enemies
+  for (const e of enemies) {
+    if (e.x - cx > BASE_W || e.x + e.w - cx < 0) continue;
+    ctx.fillStyle = '#e63946';
+    ctx.fillRect(Math.floor(e.x - cx), e.y, e.w, e.h);
+    // Eyes
+    ctx.fillStyle = '#fff';
+    const eyeOffset = e.vx > 0 ? 4 : -4;
+    ctx.fillRect(Math.floor(e.x - cx) + 6 + eyeOffset, e.y + 8, 6, 6);
+    ctx.fillRect(Math.floor(e.x - cx) + e.w - 12 + eyeOffset, e.y + 8, 6, 6);
+    ctx.fillStyle = '#1d3557';
+    ctx.fillRect(Math.floor(e.x - cx) + 8 + eyeOffset, e.y + 10, 2, 2);
+    ctx.fillRect(Math.floor(e.x - cx) + e.w - 10 + eyeOffset, e.y + 10, 2, 2);
+  }
+
+  // Player
+  ctx.fillStyle = '#ff9a3c';
+  ctx.fillRect(Math.floor(player.x - cx), player.y, player.w, player.h);
+  // Eyes
+  ctx.fillStyle = '#fff';
+  const pEye = player.facing > 0 ? 6 : -6;
+  ctx.fillRect(Math.floor(player.x - cx) + 6 + pEye, player.y + 10, 7, 7);
+  ctx.fillRect(Math.floor(player.x - cx) + player.w - 13 + pEye, player.y + 10, 7, 7);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(Math.floor(player.x - cx) + 8 + pEye, player.y + 12, 3, 3);
+  ctx.fillRect(Math.floor(player.x - cx) + player.w - 11 + pEye, player.y + 12, 3, 3);
+  // Cap
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fillRect(Math.floor(player.x - cx) - 2, player.y - 6, player.w + 4, 8);
+
+  // Particles
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x - cx, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawStartDecorations() {
+  // Draw a small preview scene on the start screen background
+  // Just some platform silhouettes
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  for (let i = 0; i < BASE_W; i += 80) {
+    ctx.fillRect(i, BASE_H - 120 - Math.sin(i * 0.01) * 40, 60, 12);
+  }
+}
+
+function gameLoop(now) {
+  const dt = Math.min(0.033, (now - lastTime) / 1000);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// Time step hook for Playwright
+window.advanceTime = (ms) => {
+  const dt = ms / 1000;
+  update(dt);
+  draw();
+};
+
+window.render_game_to_text = () => {
+  const payload = {
+    mode,
+    player: { x: Math.round(player.x), y: Math.round(player.y), vx: Math.round(player.vx), vy: Math.round(player.vy), onGround: player.onGround },
+    cameraX: Math.round(cameraX),
+    enemies: enemies.length,
+    coinsRemaining: coins.filter(c => !c.collected).length,
+    stats,
+  };
+  return JSON.stringify(payload);
+};
+
+// UI controls
+document.getElementById('start-btn').addEventListener('click', () => {
+  initLevel();
+  mode = 'play';
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('overlay').classList.add('hidden');
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  initLevel();
+  mode = 'play';
+  document.getElementById('result-screen').classList.add('hidden');
+  document.getElementById('overlay').classList.add('hidden');
+});
+
+initLevel();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
